@@ -1,11 +1,11 @@
-# %%
 import mujoco
 from PIL import Image
 import numpy as np
 import json
 import os
+import time
 
-model = mujoco.MjModel.from_xml_path("robotics-models/shadow_hand/left_hand.xml")
+model = mujoco.MjModel.from_xml_path("shadow_hand/left_hand.xml")
 data = mujoco.MjData(model)
 renderer = mujoco.Renderer(model, height=1280, width=1280)
 
@@ -85,6 +85,14 @@ def get_n_pose(n):
     with open(json_path, "w") as f:
         json.dump(poses_data, f, indent=2)
 
+    joint_names = []
+    for i in range(model.njnt):
+        joint_names.append(model.joint(i).name)
+
+    name_json = os.path.join("data", "_name.json")
+    with open(name_json, "w") as f:
+        json.dump(joint_names, f, indent=2)
+
 
 if __name__ == "__main__":
     import argparse
@@ -95,4 +103,8 @@ if __name__ == "__main__":
     parser.add_argument("n", type=int, help="Number of poses to generate")
 
     args = parser.parse_args()
+
+    start_time = time.time()
     get_n_pose(args.n)
+    end_time = time.time()
+    print(f"Time elapsed: {end_time - start_time:.2f} seconds")
