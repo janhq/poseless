@@ -23,15 +23,19 @@ git clone https://github.com/yourusername/poseless.git
 cd poseless
 
 # Install dependencies (to be added)
+sudo apt update                                                                                                                                    
+sudo apt install libegl1 libegl-dev
+ldconfig -p | grep libEGL #check if 
 pip install -r requirements.txt
 ```
 
 ## Usage
 To generate samples, use the following command:
 ```bash
-python gen.py <n>
+export PYOPENGL_PLATFORM=egl
+export MUJOCO_GL=egl  # Also set this.
+python gen.py <number_to_generate> --dataset_name="your-username/hand-poses-dataset" --num_test_samples <num_test_samples>
 ```
-where `<n>` is the number of samples you want to generate.
 
 ### Data Format
 The generated data is stored in the `data` folder with the following structure:
