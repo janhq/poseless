@@ -7,7 +7,6 @@ import time
 import io
 from datasets import Dataset, Features, Image as DsImage, Value
 from huggingface_hub import HfApi, login
-from PIL import Image
 from tqdm.auto import tqdm  # Import tqdm for progress bars
 
 # Set up the model and data
@@ -60,7 +59,7 @@ def get_n_pose_and_upload(n, dataset_name="hand-poses-dataset", push_to_hub=True
     
     pose_num = 0
     pbar = tqdm(total=n, desc="Generating poses", unit="pose")
-    while len(images_data) < n:
+    while len(filenames) < n:
         mujoco.mj_resetData(model, data)
         
         # Generate random joint positions
@@ -102,25 +101,21 @@ def get_n_pose_and_upload(n, dataset_name="hand-poses-dataset", push_to_hub=True
         image_filename = f"pose_{pose_num}.png"
         image_path = os.path.join("data", image_filename)
         image.save(image_path)
-        
-        # Append data 
-        images_data.append(Image.open(image_path))  
+
         joint_positions.append(data.qpos.copy().tolist())
         filenames.append(image_filename)
+        
         buf.close()
         image.close()
-        
-        
         pose_num += 1
         pbar.update(1)  # Update the main progress bar
     
     pbar.close()  # Close the main progress bar
-    
     print("Processing image data and creating conversations...")
     
     # Create conversations with tqdm progress
     conversations = []
-    for i in tqdm(range(len(images_data)), desc="Creating conversations", unit="conv"):
+    for i in tqdm(range(len(filenames)), desc="Creating conversations", unit="conv"):
         # Format each joint angle with the special token format
         joint_description = ""
         for name in joint_names:
@@ -129,7 +124,6 @@ def get_n_pose_and_upload(n, dataset_name="hand-poses-dataset", push_to_hub=True
                 if joint_idx < len(joint_positions[i]):
                     angle_value = round(joint_positions[i][joint_idx], 2)
                     joint_description += f"<{name}>{angle_value}</{name}>"
-        print(SYSTEM_PROMPT)
         conversation = [
             {"role": "system", "content": f"{SYSTEM_PROMPT}"},
             {"role": "user", "content": [
@@ -155,11 +149,19 @@ def get_n_pose_and_upload(n, dataset_name="hand-poses-dataset", push_to_hub=True
         conversations.append(conversation)
 
     conversations_json = [json.dumps(conv) for conv in conversations]
+    output_path = "data/conversations_dataset.jsonl"
+    with open(output_path, 'w') as f:
+        for conv_json in conversations_json:
+            f.write(conv_json + '\n')
+
+    for image_path in filenames:
+        images_data.append(Image.open(f"data/{image_path}")) 
+    
     dataset_dict = {
         "image": images_data,
         "conversations": conversations_json,
     }
-    
+
     # Create the Hugging Face dataset
     features = Features({
         "image": DsImage(),
