@@ -1,5 +1,7 @@
 numpy>=1.24.0
 mujoco>=2.3.7
+mujoco_mjx
+brax
 Pillow>=10.0.0
 datasets
 
