@@ -30,10 +30,36 @@ Output Format:
 """
 joint_name_to_index = {name: i for i, name in enumerate(joint_names)}
 
-# Determine optimal number of threads
 nthread = 32
 
-def generate_pose_chunk(chunk_id, n_poses_per_chunk, start_idx):
+def calculate_thread_ranges(total_poses, num_threads):
+    """
+    Calculate start and end indices for each thread to evenly distribute poses
+    
+    Args:
+        total_poses (int): Total number of poses to generate
+        num_threads (int): Number of threads to use
+    
+    Returns:
+        List of (start_index, end_index) tuples for each thread
+    """
+    base_chunk_size = total_poses // num_threads
+    remainder = total_poses % num_threads
+    
+    # Prepare thread ranges
+    thread_ranges = []
+    current_start = 0
+    
+    for thread in range(num_threads):
+        
+        current_chunk_size = base_chunk_size + (1 if thread < remainder else 0)
+        current_end = current_start + current_chunk_size
+        thread_ranges.append((current_start, current_end))
+        current_start = current_end
+    
+    return thread_ranges
+
+def generate_pose_chunk(thread_id, start_idx, end_idx):
     """Generate a chunk of poses using MuJoCo simulation"""
     # Create local model and data copies for this thread
     local_model = copy.deepcopy(model)
@@ -44,8 +70,8 @@ def generate_pose_chunk(chunk_id, n_poses_per_chunk, start_idx):
     chunk_filenames = []
     chunk_joint_positions = []
     
-    for i in range(n_poses_per_chunk):
-        pose_num = start_idx + i
+    # Generate poses for this thread's range
+    for pose_num in range(start_idx, end_idx):
         mujoco.mj_resetData(local_model, local_data)
         
         # Generate random joint positions
@@ -79,13 +105,11 @@ def generate_pose_chunk(chunk_id, n_poses_per_chunk, start_idx):
         local_renderer.update_scene(local_data, camera="closeup")
         pixels = local_renderer.render()
 
-        # Save image
-        image_filename = f"pose_{pose_num}.png"
+        image_filename = f"pose_{pose_num:06d}.png"
         image_path = os.path.join("data", image_filename)
         image = Image.fromarray(pixels)
         image.save(image_path)
         
-        # Store results
         chunk_joint_positions.append(local_data.qpos.copy().tolist())
         chunk_filenames.append(image_filename)
     
@@ -99,30 +123,27 @@ def get_n_pose_and_upload(n, dataset_name="hand-poses-dataset", push_to_hub=True
     
     os.makedirs("data", exist_ok=True)
     
-    # Prepare for parallel processing
-    chunk_size = max(1, min(1000, n // nthread))  # Limit chunk size
-    n_chunks = (n + chunk_size - 1) // chunk_size
+    thread_ranges = calculate_thread_ranges(n, nthread)
     
     all_filenames = []
     all_joint_positions = []
     
-    print(f"Using {nthread} threads to generate {n} poses in {n_chunks} chunks")
+    print(f"Using {nthread} threads to generate {n} poses")
+    print("Thread ranges:", thread_ranges)
     
     # Multi-threaded pose generation
     with concurrent.futures.ThreadPoolExecutor(max_workers=nthread) as executor:
         futures = []
-        for i in range(n_chunks):
-            start_idx = i * chunk_size
-            n_poses_in_chunk = min(chunk_size, n - start_idx)
+        for thread_id, (start_idx, end_idx) in enumerate(thread_ranges):
             futures.append(executor.submit(
                 generate_pose_chunk, 
-                i, 
-                n_poses_in_chunk, 
-                start_idx
+                thread_id,  # thread identifier 
+                start_idx,  # start index for this thread
+                end_idx     # end index for this thread
             ))
         
         # Collect results with progress bar
-        for future in tqdm(concurrent.futures.as_completed(futures), total=n_chunks, desc="Generating pose chunks"):
+        for future in tqdm(concurrent.futures.as_completed(futures), total=nthread, desc="Generating pose chunks"):
             chunk_filenames, chunk_joint_positions = future.result()
             all_filenames.extend(chunk_filenames)
             all_joint_positions.extend(chunk_joint_positions)
@@ -289,7 +310,7 @@ def get_n_pose_with_rollout(n, dataset_name="hand-poses-dataset", push_to_hub=Tr
         
         # Use rollout to simulate all poses in parallel
         # Run a short simulation to settle the hand
-        nstep = 200  # Adjust as needed
+        nstep = 2000  # Adjust as needed
         states, _ = rollout.rollout(model, datas, initial_states, nstep=nstep)
         
         # Process the final states from the rollout
