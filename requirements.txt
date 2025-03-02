@@ -1,7 +1,11 @@
+torch==2.5.1
+accelerate==1.4.0
+transformers
+datasets
+gradio
+huggingface_hub
 numpy>=1.24.0
 mujoco>=2.3.7
-mujoco_mjx
-brax
-Pillow>=10.0.0
-datasets
-
+Pillow
+qwen_vl_utils
+tqdm
