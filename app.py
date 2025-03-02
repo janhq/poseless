@@ -22,12 +22,14 @@ Output Format:
 """
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model_path = "/home/jovyan/visual-thinker-workspace/LLaMA-Factory/saves/qwen2.5_vl/full/sft/checkpoint-1500/"
+min_pixels = 256 * 28 * 28
+max_pixels = 1280 * 28 * 28
 model= Qwen2_5_VLForConditionalGeneration.from_pretrained(
         model_path, 
         trust_remote_code=True, 
         torch_dtype=torch.bfloat16,
     ).eval().to(device)
-processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+processor = AutoProcessor.from_pretrained(model_path, min_pixels=min_pixels, max_pixels=max_pixels, trust_remote_code=True)
 
 def parse_angles(xml_string):
     # Regular expression to match tags and their content
@@ -82,6 +84,8 @@ def poseless_infer(image, text_input="<Pose>", device=device):
             {
                 "type": "image",
                 "image": image_path,
+                "min_pixels": 1003520,
+                "max_pixels": 1003520,
             },
             {"type": "text", "text": text_input},
         ],
@@ -149,7 +153,7 @@ def process_hand_image(input_image):
     
     # Step 1: Process the image with VLM
     try:
-        vlm_output = poseless_infer(input_image)[0]  # Get first result from the list
+        vlm_output = poseless_infer(input_image)  # Get first result from the list
         
         # Step 2: Render the hand using the angles from VLM output
         rendered_image = render_hand_image(vlm_output)
@@ -300,4 +304,4 @@ with gr.Blocks(css=css, title="POSELESS") as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0")
+    demo.launch(server_name="0.0.0.0", share=True)
