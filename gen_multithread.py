@@ -159,7 +159,7 @@ def get_n_pose_and_upload(n, dataset_name="hand-poses-dataset", push_to_hub=True
             if name in joint_name_to_index:
                 joint_idx = joint_name_to_index[name]
                 if joint_idx < len(all_joint_positions[i]):
-                    angle_value = round(all_joint_positions[i][joint_idx], 2)
+                    angle_value = round(all_joint_positions[i][joint_idx], 4)
                     joint_description += f"<{name}>{angle_value}</{name}>"
         
         conversation = [
@@ -352,7 +352,7 @@ def get_n_pose_with_rollout(n, dataset_name="hand-poses-dataset", push_to_hub=Tr
             if name in joint_name_to_index:
                 joint_idx = joint_name_to_index[name]
                 if joint_idx < len(all_joint_positions[i]):
-                    angle_value = round(all_joint_positions[i][joint_idx], 2)
+                    angle_value = round(all_joint_positions[i][joint_idx], 4)
                     joint_description += f"<{name}>{angle_value}</{name}>"
         
         conversation = [
