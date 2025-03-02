@@ -6,7 +6,6 @@ import time
 import tempfile
 from PIL import Image
 import torch
-import cv2
 from transformers import (
     Qwen2_5_VLForConditionalGeneration,
     AutoTokenizer,
@@ -22,36 +21,36 @@ Output Format:
 <lh_WRJ2>angle</lh_WRJ2><lh_WRJ1>angle</lh_WRJ1><lh_FFJ4>angle</lh_FFJ4><lh_FFJ3>angle</lh_FFJ3><lh_FFJ2>angle</lh_FFJ2><lh_FFJ1>angle</lh_FFJ1><lh_MFJ4>angle</lh_MFJ4><lh_MFJ3>angle</lh_MFJ3><lh_MFJ2>angle</lh_MFJ2><lh_MFJ1>angle</lh_MFJ1><lh_RFJ4>angle</lh_RFJ4><lh_RFJ3>angle</lh_RFJ3><lh_RFJ2>angle</lh_RFJ2><lh_RFJ1>angle</lh_RFJ1><lh_LFJ5>angle</lh_LFJ5><lh_LFJ4>angle</lh_LFJ4><lh_LFJ3>angle</lh_LFJ3><lh_LFJ2>angle</lh_LFJ2><lh_LFJ1>angle</lh_LFJ1><lh_THJ5>angle</lh_THJ5><lh_THJ4>angle</lh_THJ4><lh_THJ3>angle</lh_THJ3><lh_THJ2>angle</lh_THJ2><lh_THJ1>angle</lh_THJ1>
 """
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model_path = ""
-# Init robot hand using mujoco
-model = mujoco.MjModel.from_xml_path("shadow_hand/left_hand.xml")
-data = mujoco.MjData(model)
-renderer = mujoco.Renderer(model, height=1280, width=1280)
+model_path = "/home/jovyan/visual-thinker-workspace/LLaMA-Factory/saves/qwen2.5_vl/full/sft/checkpoint-1500/"
+model= Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        model_path, 
+        trust_remote_code=True, 
+        torch_dtype=torch.bfloat16,
+    ).eval().to(device)
+processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
 
-def parse_angles(llm_response):
-    """
-    Parses an LLM response string, extracts angle values, converts them to floats,
-    and returns them in a list while preserving the original order.
-
-    Args:
-        llm_response: The string response from the LLM.
-
-    Returns:
-        A list of floats representing the extracted angles, or an empty list
-        if no angles are found or if there's an error during conversion.
-    """
-
-    # Use regex to find all occurrences of <tag>angle</tag>
-    matches = re.findall(r"<(.*?)>([\d\.-]+)</\1>", llm_response)
-
+def parse_angles(xml_string):
+    # Regular expression to match tags and their content
+    pattern = r'<([^>]+)>([^<]+)</\1>'
+    
+    # Find all matches in the input string
+    matches = re.findall(pattern, xml_string)
+    
+    # Extract the angle values and convert to float
     angles = []
-    for tag, angle_str in matches:
+    angle_dict = {}
+    
+    for tag, value in matches:
         try:
-            angle_float = float(angle_str)
-            angles.append(angle_float)
+            float_value = float(value)
+            angles.append(float_value)
+            angle_dict[tag] = float_value
         except ValueError:
-            print(f"Warning: Could not convert '{angle_str}' to float. Skipping.")
-    return angles
+            print(f"Error: Could not convert value '{value}' for tag '{tag}' to float")
+            angles.append(None)
+            angle_dict[tag] = None
+    
+    return angles, angle_dict
 # Copy from Qwen2.5 VL demo: https://huggingface.co/spaces/mrdbourke/Qwen2.5-VL-Instruct-Demo/blob/main/app.py.
 def array_to_image_path(image_array):
     if image_array is None:
@@ -61,7 +60,7 @@ def array_to_image_path(image_array):
     
     # Generate a unique filename using timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"user_assets/image_{timestamp}.png"
+    filename = f"image_{timestamp}.png"
     
     # Save the image
     img.save(filename)
@@ -72,7 +71,7 @@ def array_to_image_path(image_array):
     return full_path
 
 def poseless_infer(image, text_input="<Pose>", device=device):
-    global SYSTEM_PROMPT
+    global SYSTEM_PROMPT, model, processor
     image_path = array_to_image_path(image)
     image = Image.fromarray(image).convert("RGB")
     messages = [
@@ -88,13 +87,6 @@ def poseless_infer(image, text_input="<Pose>", device=device):
         ],
     },
     ]
-    
-    model= Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        model_path, 
-        trust_remote_code=True, 
-        torch_dtype=torch.bfloat16,
-    ).eval().to(device)
-    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
     text = processor.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
@@ -115,11 +107,19 @@ def poseless_infer(image, text_input="<Pose>", device=device):
     output_text = processor.batch_decode(
         generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
     )
-    return output_text
+    print(output_text[0])
+    return output_text[0]
     
 def render_hand_image(vlm_text):
-    mujoco.mj_resetData(model, data)
-    target_positions = parse_angles(vlm_text)
+    # Init robot hand using mujoco
+    model_render = mujoco.MjModel.from_xml_path("shadow_hand/left_hand.xml")
+    data = mujoco.MjData(model_render)
+    renderer = mujoco.Renderer(model_render, height=1280, width=1280)
+    joint_name_to_index = {model_render.joint(i).name: model_render.joint(i).qposadr[0] for i in range(model_render.njnt)}
+    _, target_positions_dict = parse_angles(vlm_text)
+    target_positions = [(joint_name_to_index[k], np.float32(v)) for k, v in target_positions_dict.items()]
+    print(target_positions)
+    # mujoco.mj_resetData(model_render, data)
     for step in range(2000):
         for qpos_addr, target_pos in target_positions:
             current_pos = data.qpos[qpos_addr]
@@ -128,7 +128,7 @@ def render_hand_image(vlm_text):
             data.qfrc_applied[qpos_addr] = kp * error
         
         # Step physics
-        mujoco.mj_step(model, data)
+        mujoco.mj_step(model_render, data)
         if step % 100 == 0:
             total_error = 0
             for qpos_addr, target_pos in target_positions:
@@ -137,7 +137,7 @@ def render_hand_image(vlm_text):
                 break
         
     # Forward kinematics and render
-    mujoco.mj_forward(model, data)
+    mujoco.mj_forward(model_render, data)
     renderer.update_scene(data, camera="closeup")
     pixels = renderer.render()
     image = Image.fromarray(pixels)
@@ -158,6 +158,7 @@ def process_hand_image(input_image):
         return rendered_image, vlm_output
     except Exception as e:
         return None, f"Error processing image: {str(e)}"
+    return rendered_image, vlm_output
 
 
 
@@ -228,12 +229,12 @@ body {
     color: var(--highlight-color);
 }
 """
-with gr.Blocks(css=css, title="AI Hand Pose Analyzer") as demo:
+with gr.Blocks(css=css, title="POSELESS") as demo:
     # Header with robotic style
     gr.HTML("""
         <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
         <div class="title">
-            <h1>AI HAND POSE ANALYZER v1.0</h1>
+            <h1>POSELESS v1.0</h1>
             <p><span class="status-indicator"></span> SYSTEM ONLINE</p>
         </div>
     """)
@@ -278,7 +279,7 @@ with gr.Blocks(css=css, title="AI Hand Pose Analyzer") as demo:
     # Example section with robotic styling
     gr.HTML('<div class="panel-title" style="margin-top: 30px;">SAMPLE DATASETS</div>')
     gr.Examples(
-        examples=["example1.jpg", "example2.jpg"],
+        examples=["examples/pose_000000.png"],
         inputs=input_image,
         outputs=[output_image, output_text],
         fn=process_hand_image,

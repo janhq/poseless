@@ -1,4 +1,5 @@
 torch==2.5.1
+torchvision
 accelerate==1.4.0
 transformers
 datasets
