@@ -107,8 +107,8 @@ class HandPoseProcessor:
         return output_text[0]
 
     def calculate_mse(self, pred_angles, gt_angles):
-        pred_tensor = torch.tensor(pred_angles)
-        gt_tensor = torch.tensor(gt_angles)
+        pred_tensor = torch.tensor(pred_angles) * 180 / torch.pi
+        gt_tensor = torch.tensor(gt_angles) * 180 / torch.pi
         return torch.nn.functional.mse_loss(pred_tensor, gt_tensor).item()
 
     def extract_gt_angles(self, conversation):
