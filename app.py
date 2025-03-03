@@ -1,20 +1,18 @@
-import gradio as gr
-import numpy as np
 import os
-from datetime import datetime
-import time
-import tempfile
-from PIL import Image
-import torch
-from transformers import (
-    Qwen2_5_VLForConditionalGeneration,
-    AutoTokenizer,
-    AutoProcessor
-)
-from qwen_vl_utils import process_vision_info
-import accelerate
 import re
+from datetime import datetime
+
+import gradio as gr
 import mujoco
+import numpy as np
+import torch
+from PIL import Image
+from qwen_vl_utils import process_vision_info
+from transformers import (
+    AutoProcessor,
+    AutoTokenizer,
+    Qwen2_5_VLForConditionalGeneration,
+)
 
 SYSTEM_PROMPT = """You are a specialized Vision Language Model designed to accurately estimate joint angles from hand pose images. Your task is to analyze images of a human or robotic hand and output precise angle measurements for each joint. Output joint angles in radians.
 Output Format:
@@ -24,24 +22,31 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model_path = "/home/jovyan/visual-thinker-workspace/LLaMA-Factory/saves/qwen2.5_vl/full/sft/checkpoint-1500/"
 min_pixels = 256 * 28 * 28
 max_pixels = 1280 * 28 * 28
-model= Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        model_path, 
-        trust_remote_code=True, 
+model = (
+    Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        model_path,
+        trust_remote_code=True,
         torch_dtype=torch.bfloat16,
-    ).eval().to(device)
-processor = AutoProcessor.from_pretrained(model_path, min_pixels=min_pixels, max_pixels=max_pixels, trust_remote_code=True)
+    )
+    .eval()
+    .to(device)
+)
+processor = AutoProcessor.from_pretrained(
+    model_path, min_pixels=min_pixels, max_pixels=max_pixels, trust_remote_code=True
+)
+
 
 def parse_angles(xml_string):
     # Regular expression to match tags and their content
-    pattern = r'<([^>]+)>([^<]+)</\1>'
-    
+    pattern = r"<([^>]+)>([^<]+)</\1>"
+
     # Find all matches in the input string
     matches = re.findall(pattern, xml_string)
-    
+
     # Extract the angle values and convert to float
     angles = []
     angle_dict = {}
-    
+
     for tag, value in matches:
         try:
             float_value = float(value)
@@ -51,45 +56,48 @@ def parse_angles(xml_string):
             print(f"Error: Could not convert value '{value}' for tag '{tag}' to float")
             angles.append(None)
             angle_dict[tag] = None
-    
+
     return angles, angle_dict
+
+
 # Copy from Qwen2.5 VL demo: https://huggingface.co/spaces/mrdbourke/Qwen2.5-VL-Instruct-Demo/blob/main/app.py.
 def array_to_image_path(image_array):
     if image_array is None:
         raise ValueError("No image provided. Please upload an image before submitting.")
     # Convert numpy array to PIL Image
     img = Image.fromarray(np.uint8(image_array))
-    
+
     # Generate a unique filename using timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"image_{timestamp}.png"
-    
+
     # Save the image
     img.save(filename)
-    
+
     # Get the full path of the saved image
     full_path = os.path.abspath(filename)
-    
+
     return full_path
+
 
 def poseless_infer(image, text_input="<Pose>", device=device):
     global SYSTEM_PROMPT, model, processor
     image_path = array_to_image_path(image)
     image = Image.fromarray(image).convert("RGB")
     messages = [
-    {"role": "system", "content": f"{SYSTEM_PROMPT}"},
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "image",
-                "image": image_path,
-                "min_pixels": 1003520,
-                "max_pixels": 1003520,
-            },
-            {"type": "text", "text": text_input},
-        ],
-    },
+        {"role": "system", "content": f"{SYSTEM_PROMPT}"},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "image": image_path,
+                    "min_pixels": 1003520,
+                    "max_pixels": 1003520,
+                },
+                {"type": "text", "text": text_input},
+            ],
+        },
     ]
     text = processor.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
@@ -106,22 +114,32 @@ def poseless_infer(image, text_input="<Pose>", device=device):
     inputs = inputs.to(device)
     generated_ids = model.generate(**inputs, max_new_tokens=1024)
     generated_ids_trimmed = [
-        out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        out_ids[len(in_ids) :]
+        for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
     ]
     output_text = processor.batch_decode(
-        generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        generated_ids_trimmed,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False,
     )
     print(output_text[0])
     return output_text[0]
-    
+
+
 def render_hand_image(vlm_text):
     # Init robot hand using mujoco
     model_render = mujoco.MjModel.from_xml_path("shadow_hand/left_hand.xml")
     data = mujoco.MjData(model_render)
     renderer = mujoco.Renderer(model_render, height=1280, width=1280)
-    joint_name_to_index = {model_render.joint(i).name: model_render.joint(i).qposadr[0] for i in range(model_render.njnt)}
+    joint_name_to_index = {
+        model_render.joint(i).name: model_render.joint(i).qposadr[0]
+        for i in range(model_render.njnt)
+    }
     _, target_positions_dict = parse_angles(vlm_text)
-    target_positions = [(joint_name_to_index[k], np.float32(v)) for k, v in target_positions_dict.items()]
+    target_positions = [
+        (joint_name_to_index[k], np.float32(v))
+        for k, v in target_positions_dict.items()
+    ]
     print(target_positions)
     # mujoco.mj_resetData(model_render, data)
     for step in range(2000):
@@ -130,7 +148,7 @@ def render_hand_image(vlm_text):
             kp = 10.0  # Proportional gain
             error = target_pos - current_pos
             data.qfrc_applied[qpos_addr] = kp * error
-        
+
         # Step physics
         mujoco.mj_step(model_render, data)
         if step % 100 == 0:
@@ -139,7 +157,7 @@ def render_hand_image(vlm_text):
                 total_error += abs(target_pos - data.qpos[qpos_addr])
             if total_error < 0.1 or (step > 500 and data.ncon < 10):
                 break
-        
+
     # Forward kinematics and render
     mujoco.mj_forward(model_render, data)
     renderer.update_scene(data, camera="closeup")
@@ -147,23 +165,23 @@ def render_hand_image(vlm_text):
     image = Image.fromarray(pixels)
     return image
 
+
 def process_hand_image(input_image):
     if input_image is None:
         return None, "No image provided"
-    
+
     # Step 1: Process the image with VLM
     try:
         vlm_output = poseless_infer(input_image)  # Get first result from the list
-        
+
         # Step 2: Render the hand using the angles from VLM output
         rendered_image = render_hand_image(vlm_output)
-        
+
         # Return both the rendered image and the VLM output
         return rendered_image, vlm_output
     except Exception as e:
         return None, f"Error processing image: {str(e)}"
     return rendered_image, vlm_output
-
 
 
 # Custom CSS for robotic theme
@@ -235,26 +253,29 @@ body {
 """
 with gr.Blocks(css=css, title="POSELESS") as demo:
     # Header with robotic style
-    gr.HTML("""
+    gr.HTML(
+        """
         <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
         <div class="title">
             <h1>POSELESS v1.0</h1>
             <p><span class="status-indicator"></span> SYSTEM ONLINE</p>
         </div>
-    """)
-    
+    """
+    )
+
     # Main interface
     with gr.Row():
         # Input panel
         with gr.Column():
             gr.HTML('<div class="panel-title">INPUT TERMINAL</div>')
             input_image = gr.Image(label="Input Hand Image", height=400)
-            
+
             with gr.Row():
                 clear_btn = gr.Button("RESET", variant="secondary")
                 process_btn = gr.Button("ANALYZE", variant="primary")
-            
-            gr.HTML("""
+
+            gr.HTML(
+                """
                 <div style="margin-top: 20px; padding: 15px; border: 1px solid #00b4d8; border-radius: 8px; background-color: rgba(0, 180, 216, 0.1);">
                     <h4 style="margin-top: 0;">SYSTEM INSTRUCTIONS:</h4>
                     <ol>
@@ -263,23 +284,28 @@ with gr.Blocks(css=css, title="POSELESS") as demo:
                         <li>View the rendered 3D model and angle data</li>
                     </ol>
                 </div>
-            """)
-        
+            """
+            )
+
         # Output panel
         with gr.Column():
             gr.HTML('<div class="panel-title">OUTPUT TERMINAL</div>')
             output_image = gr.Image(label="3D MODEL RENDERING", height=400)
             with gr.Accordion("PROCESSING LOGS", open=False):
-                output_text = gr.Textbox(label="", lines=5, placeholder="Processing data will appear here...")
-            
-            gr.HTML("""
+                output_text = gr.Textbox(
+                    label="", lines=5, placeholder="Processing data will appear here..."
+                )
+
+            gr.HTML(
+                """
                 <div style="margin-top: 20px; font-family: monospace; padding: 10px; background-color: rgba(0, 180, 216, 0.1); border-radius: 8px;">
                     <div>SYSTEM STATUS: <span style="color: #4CAF50;">■ OPERATIONAL</span></div>
                     <div>MODEL: <span>HAND-POSE-VLM-v2.3</span></div>
                     <div>RENDERER: <span>MUJOCO-ENGINE-v1.5</span></div>
                 </div>
-            """)
-    
+            """
+            )
+
     # Example section with robotic styling
     gr.HTML('<div class="panel-title" style="margin-top: 30px;">SAMPLE DATASETS</div>')
     gr.Examples(
@@ -287,20 +313,16 @@ with gr.Blocks(css=css, title="POSELESS") as demo:
         inputs=input_image,
         outputs=[output_image, output_text],
         fn=process_hand_image,
-        examples_per_page=4
+        examples_per_page=4,
     )
-    
+
     # Event handlers
     process_btn.click(
-        fn=process_hand_image,
-        inputs=[input_image],
-        outputs=[output_image, output_text]
+        fn=process_hand_image, inputs=[input_image], outputs=[output_image, output_text]
     )
 
     clear_btn.click(
-        fn=lambda: (None, ""),
-        inputs=[],
-        outputs=[output_image, output_text]
+        fn=lambda: (None, ""), inputs=[], outputs=[output_image, output_text]
     )
 
 if __name__ == "__main__":
