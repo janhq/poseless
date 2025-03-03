@@ -1,0 +1,23 @@
+name: CI - Build Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**.py"
+      - .github/workflows/build.yaml
+      - .github/workflows/template-docker.yaml
+
+jobs:
+  build-docker-x64:
+    uses: ./.github/workflows/template-docker.yaml
+    secrets: inherit
+    with:
+      runs-on: ubuntu-latest
+      docker-file: Dockerfile
+      context: .
+      readme-file: README.md
+      docker-repo-name: menloltd/poseless
+      tags: menloltd/poseless:dev-${{ github.sha }}
+      is_push: true
