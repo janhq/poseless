@@ -1,10 +1,12 @@
+import base64
+import io
 import re
+
 import torch
+from datasets import load_dataset
 from qwen_vl_utils import process_vision_info
-from transformers import (
-    AutoProcessor,
-    Qwen2_5_VLForConditionalGeneration,
-)
+from tqdm import tqdm
+from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
 SYSTEM_PROMPT = """You are a specialized Vision Language Model designed to accurately estimate joint angles from hand pose images. Your task is to analyze images of a human or robotic hand and output precise angle measurements for each joint. Output joint angles in radians.
 Output Format:
@@ -104,11 +106,56 @@ class HandPoseProcessor:
 
         return output_text[0]
 
+    def calculate_mse(self, pred_angles, gt_angles):
+        pred_tensor = torch.tensor(pred_angles)
+        gt_tensor = torch.tensor(gt_angles)
+        return torch.nn.functional.mse_loss(pred_tensor, gt_tensor).item()
+
+    def extract_gt_angles(self, conversation):
+        for msg in conversation:
+            if msg["role"] == "assistant":
+                content = msg["content"][0]["content"]
+                angles, _ = self.parse_angles(content)
+                return angles
+        return None
+
 
 def main():
+    dataset = load_dataset("jan-hq/robot-hand-poses", split="test")
     processor = HandPoseProcessor("jan-hq/Poseless-3B-cp-1500")
-    angles = processor.process_image("data/pose_0.png")
-    print("Joint angles:", angles)
+
+    total_mse = 0
+    valid_samples = 0
+
+    for sample in tqdm(dataset):
+        try:
+            gt_angles = processor.extract_gt_angles(eval(sample["conversations"]))
+
+            if not gt_angles:
+                continue
+
+            buffered = io.BytesIO()
+            sample["image"].save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            image_base64 = f"data:image/png;base64,{img_str}"
+
+            # Get predicted angles
+            pred_output = processor.process_image(image_base64)
+            pred_angles, _ = processor.parse_angles(pred_output)
+
+            mse = processor.calculate_mse(pred_angles, gt_angles)
+            total_mse += mse
+            valid_samples += 1
+
+            print(f"Sample MSE: {mse:.4f}")
+
+        except Exception as e:
+            print(f"Error processing sample: {e}")
+            continue
+
+    avg_mse = total_mse / valid_samples if valid_samples > 0 else float("inf")
+    print(f"\nAverage MSE across {valid_samples} samples: {avg_mse:.4f}")
+    return avg_mse
 
 
 if __name__ == "__main__":
