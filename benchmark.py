@@ -2,6 +2,7 @@ import base64
 import io
 import re
 
+import numpy as np
 import torch
 from datasets import load_dataset
 from qwen_vl_utils import process_vision_info
@@ -121,10 +122,11 @@ class HandPoseProcessor:
 
 
 def main():
-    dataset = load_dataset("jan-hq/robot-hand-poses", split="test")
+    dataset = load_dataset("jan-hq/robotic-hand-poses-eval", split="test")
     processor = HandPoseProcessor("jan-hq/Poseless-3B-cp-1500")
 
     total_mse = 0
+    mse_values = []
     valid_samples = 0
 
     for sample in tqdm(dataset):
@@ -144,6 +146,7 @@ def main():
 
             mse = processor.calculate_mse(pred_angles, gt_angles)
             total_mse += mse
+            mse_values.append(mse)
             valid_samples += 1
 
             print(f"Sample MSE: {mse:.4f}")
@@ -152,9 +155,19 @@ def main():
             print(f"Error processing sample: {e}")
             continue
 
+    mse_array = np.array(mse_values)
     avg_mse = total_mse / valid_samples if valid_samples > 0 else float("inf")
-    print(f"\nAverage MSE across {valid_samples} samples: {avg_mse:.4f}")
-    return avg_mse
+    std_mse = np.std(mse_array) if valid_samples > 0 else float("inf")
+    min_mse = np.min(mse_array) if valid_samples > 0 else float("inf")
+    max_mse = np.max(mse_array) if valid_samples > 0 else float("inf")
+
+    print(f"\nStatistics across {valid_samples} samples:")
+    print(f"Average MSE: {avg_mse:.4f}")
+    print(f"Standard Deviation MSE: {std_mse:.4f}")
+    print(f"Minimum MSE: {min_mse:.4f}")
+    print(f"Maximum MSE: {max_mse:.4f}")
+
+    return avg_mse, std_mse, min_mse, max_mse
 
 
 if __name__ == "__main__":
