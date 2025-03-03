@@ -61,7 +61,7 @@ class HandPoseProcessor:
         vlm_output = self._infer_angles(image_path)
         return vlm_output
 
-    def _infer_angles(self, image_path):
+    def _infer_angles(self, image):
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -69,7 +69,7 @@ class HandPoseProcessor:
                 "content": [
                     {
                         "type": "image",
-                        "image": image_path,
+                        "image": image,
                         "min_pixels": 1003520,
                         "max_pixels": 1003520,
                     },
@@ -139,7 +139,6 @@ def main():
             img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
             image_base64 = f"data:image/png;base64,{img_str}"
 
-            # Get predicted angles
             pred_output = processor.process_image(image_base64)
             pred_angles, _ = processor.parse_angles(pred_output)
 
