@@ -34,29 +34,6 @@ To generate samples, use the following command:
 ```bash
 export PYOPENGL_PLATFORM=egl
 export MUJOCO_GL=egl  # Also set this.
-python gen.py <number_to_generate> --dataset_name="your-username/hand-poses-dataset" --num_test_samples <num_test_samples>
+python gen_multithread.py <number_to_generate> --dataset_name="your-username/hand-poses-dataset" --num_test_samples <num_test_samples>
 ```
 
-### Data Format
-The generated data is stored in the `data` folder with the following structure:
-- `_index.json`: Contains the joint angle values where the keys are the image file's name
-- `_name.json`: Contains the corresponding joint names for each angle value
-- `pose_{n}.png`: Contains the image corresponding with the angle values in `_index`
-
-Example:
-```
-data/
-  ├── _index.json
-  ├── _name.json
-  └── pose_0.png
-```
-
-## Project Structure
-```
-poseless/
-├── data/               # Generated sample data
-├── shadow_hand/        # The model for shadowhand dexterous hand 
-├── gen.py              # Sample generation script
-├── requirements.txt    # Project dependencies
-└── README.md           # Project documentation
-```
